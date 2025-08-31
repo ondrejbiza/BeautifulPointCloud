@@ -202,11 +202,6 @@ class PointCloudRenderer:
             pcl_data = pcl_data[np.newaxis, :, :]
 
         for index, pcl in enumerate(pcl_data):
-            pcl = self.standardize_point_cloud(pcl)
-            pcl = self.apply_rotation(pcl, self.rotation)
-            pcl = self.apply_translation(pcl, self.translation)
-            pcl = pcl[:, [2, 0, 1]]
-
             output_filename = f'{self.filename}_{index:02d}'
             output_file_path = save_dir / output_filename
             print(f'Processing {output_filename}...')
