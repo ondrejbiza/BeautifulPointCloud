@@ -1,3 +1,10 @@
+# [25/08/31]
+
+Run the following to render mug point cloud:
+```
+python point_cloud_renderer.py mug2.npy --rotate $(( -3.14 / 2.0 )) $(( -3.14 * 0.5 )) 0 --translate 0 -0.1 0
+```
+
 # Beautiful Point Cloud
 
 ![mitsuba rendering](mitsuba_rendering.png)
