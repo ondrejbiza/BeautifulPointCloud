@@ -1,8 +1,10 @@
-import numpy as np
 import argparse
 import os
-from plyfile import PlyData
+from pathlib import Path
+
 import mitsuba as mi
+import numpy as np
+from plyfile import PlyData
 
 
 class XMLTemplates:
@@ -137,11 +139,14 @@ class PointCloudRenderer:
         else:
             raise ValueError('Unsupported file format.')
 
-    def generate_xml_content(self, pcl):
+    def generate_xml_content(self, pcl, pcl_colors = None):
         xml_segments = [self.XML_HEAD]
-        for point in pcl:
-            color = self.compute_color(
-                point[0] + 0.5, point[1] + 0.5, point[2] + 0.5 - 0.0125)
+        for i, point in enumerate(pcl):
+            if pcl_colors is not None:
+                color = pcl_colors[i]
+            else:
+                color = self.compute_color(
+                    point[0] + 0.5, point[1] + 0.5, point[2] + 0.5 - 0.0125)
             xml_segments.append(self.XML_BALL_SEGMENT.format(
                 point[0], point[1], point[2], *color))
         xml_segments.append(self.XML_TAIL)
@@ -165,9 +170,32 @@ class PointCloudRenderer:
     def save_scene(output_file_path, rendered_scene):
         mi.util.write_bitmap(f'{output_file_path}.png', rendered_scene)
 
+    def render_pcl_and_color(self, pcl, color, output_file_path):
+        """Renders a point cloud with optional color info.
+        
+        Args:
+            pcl: Nx3 point cloud.
+            color: Nx3 RGB color array, or None in which case x,y,z colormap is generated.
+            output_file_path: (Temp) file path to save XML config to.
+        
+        Returns:
+            Image as a HxWx3 numpy array.
+        """
+        pcl = self.standardize_point_cloud(pcl)
+        pcl = self.apply_rotation(pcl, self.rotation)
+        pcl = self.apply_translation(pcl, self.translation)
+        pcl = pcl[:, [2, 0, 1]]  # TODO: not sure why we do this.
+
+        xml_content = self.generate_xml_content(pcl, color)
+        xml_file_path = self.save_xml_content_to_file(output_file_path, xml_content)
+        return self.render_scene(xml_file_path)
+
     def process(self):
-        from pathlib import Path
-        Path(self.output_path).mkdir(exist_ok=True, parents=True)
+        if self.output_path is not None and len(self.output_path) > 0:
+            save_dir = Path(self.output_path).expanduser().resolve()
+            save_dir.mkdir(exist_ok=True, parents=True)
+        else:
+            save_dir = Path(".").resolve()
 
         pcl_data = self.load_point_cloud()
         if len(pcl_data.shape) < 3:
@@ -178,15 +206,11 @@ class PointCloudRenderer:
             pcl = self.apply_rotation(pcl, self.rotation)
             pcl = self.apply_translation(pcl, self.translation)
             pcl = pcl[:, [2, 0, 1]]
-            pcl[:, 0] *= -1
-            pcl[:, 2] += -0.1
 
             output_filename = f'{self.filename}_{index:02d}'
-            output_file_path = f'{self.output_path}/{output_filename}'
+            output_file_path = save_dir / output_filename
             print(f'Processing {output_filename}...')
-            xml_content = self.generate_xml_content(pcl)
-            xml_file_path = self.save_xml_content_to_file(output_file_path, xml_content)
-            rendered_scene = self.render_scene(xml_file_path)
+            rendered_scene = self.render_pcl_and_color(pcl, None, output_file_path)
             self.save_scene(output_file_path, rendered_scene)
             print(f'Finished processing {output_filename}.')
 
