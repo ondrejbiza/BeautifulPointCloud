@@ -1,5 +1,5 @@
 import numpy as np
-import sys
+import argparse
 import os
 from plyfile import PlyData
 import mitsuba as mi
@@ -74,11 +74,14 @@ class PointCloudRenderer:
     XML_BALL_SEGMENT = XMLTemplates.BALL_SEGMENT
     XML_TAIL = XMLTemplates.TAIL
 
-    def __init__(self, file_path):
+    def __init__(self, file_path, output_path=None, translation=None, rotation=None):
         self.file_path = file_path
         self.folder, full_filename = os.path.split(file_path)
         self.folder = self.folder or '.'
         self.filename, _ = os.path.splitext(full_filename)
+        self.output_path = output_path or self.folder
+        self.translation = translation if translation is not None else np.array([0.0, 0.0, 0.0])
+        self.rotation = rotation if rotation is not None else np.array([0.0, 0.0, 0.0])
 
     @staticmethod
     def compute_color(x, y, z):
@@ -92,7 +95,35 @@ class PointCloudRenderer:
         pcl = pcl[pt_indices]
         center = np.mean(pcl, axis=0)
         scale = np.amax(pcl - np.amin(pcl, axis=0))
-        return ((pcl - center) / scale).astype(np.float32)
+        return ((pcl - center) / scale).astype(np.float32) * 0.5
+
+    @staticmethod
+    def apply_rotation(pcl, rotation):
+        rx, ry, rz = rotation
+        
+        # Rotation matrix around X-axis
+        Rx = np.array([[1, 0, 0],
+                       [0, np.cos(rx), -np.sin(rx)],
+                       [0, np.sin(rx), np.cos(rx)]])
+        
+        # Rotation matrix around Y-axis  
+        Ry = np.array([[np.cos(ry), 0, np.sin(ry)],
+                       [0, 1, 0],
+                       [-np.sin(ry), 0, np.cos(ry)]])
+        
+        # Rotation matrix around Z-axis
+        Rz = np.array([[np.cos(rz), -np.sin(rz), 0],
+                       [np.sin(rz), np.cos(rz), 0],
+                       [0, 0, 1]])
+        
+        # Combined rotation matrix (order: Z * Y * X)
+        R = Rz @ Ry @ Rx
+        
+        return (R @ pcl.T).T
+
+    @staticmethod
+    def apply_translation(pcl, translation):
+        return pcl + translation
 
     def load_point_cloud(self):
         file_extension = os.path.splitext(self.file_path)[1]
@@ -135,18 +166,23 @@ class PointCloudRenderer:
         mi.util.write_bitmap(f'{output_file_path}.png', rendered_scene)
 
     def process(self):
+        from pathlib import Path
+        Path(self.output_path).mkdir(exist_ok=True, parents=True)
+
         pcl_data = self.load_point_cloud()
         if len(pcl_data.shape) < 3:
             pcl_data = pcl_data[np.newaxis, :, :]
 
         for index, pcl in enumerate(pcl_data):
             pcl = self.standardize_point_cloud(pcl)
+            pcl = self.apply_rotation(pcl, self.rotation)
+            pcl = self.apply_translation(pcl, self.translation)
             pcl = pcl[:, [2, 0, 1]]
             pcl[:, 0] *= -1
-            pcl[:, 2] += 0.0125
+            pcl[:, 2] += -0.1
 
             output_filename = f'{self.filename}_{index:02d}'
-            output_file_path = f'{self.folder}/{output_filename}'
+            output_file_path = f'{self.output_path}/{output_filename}'
             print(f'Processing {output_filename}...')
             xml_content = self.generate_xml_content(pcl)
             xml_file_path = self.save_xml_content_to_file(output_file_path, xml_content)
@@ -155,14 +191,23 @@ class PointCloudRenderer:
             print(f'Finished processing {output_filename}.')
 
 
-def main(argv):
-    if len(argv) < 2:
-        print('Filename not provided as argument.')
-        return
-
-    renderer = PointCloudRenderer(argv[1])
+def main():
+    parser = argparse.ArgumentParser(description='Render point clouds as 3D scenes')
+    parser.add_argument('filename', help='Path to the point cloud file (.npy, .npz, or .ply)')
+    parser.add_argument('--output', '-o', help='Output directory path (default: same as input file)')
+    parser.add_argument('--translate', nargs=3, type=float, metavar=('x', 'y', 'z'), 
+                       help='Translation values for x, y, z axes')
+    parser.add_argument('--rotate', nargs=3, type=float, metavar=('rx', 'ry', 'rz'),
+                       help='Rotation values for x, y, z axes (in radians)')
+    
+    args = parser.parse_args()
+    
+    translation = np.array(args.translate) if args.translate else None
+    rotation = np.array(args.rotate) if args.rotate else None
+    
+    renderer = PointCloudRenderer(args.filename, args.output, translation, rotation)
     renderer.process()
 
 
 if __name__ == '__main__':
-    main(sys.argv)
+    main()
